@@ -1,0 +1,10 @@
+{
+    "manifest_version": 3,
+    "name": "AI LC Debugger",
+    "version": "1.0",
+    "description": "Debug your Leetcode problems",
+    "permissions": ["activeTab", "scripting", "storage"],
+    "action": {
+        "default_popup": "index.html"
+    }
+}
