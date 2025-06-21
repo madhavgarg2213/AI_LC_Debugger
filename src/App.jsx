@@ -1,6 +1,6 @@
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
-import { Key, CheckCircle } from 'lucide-react'
+import { Key, CheckCircle, MessageCircle, Info } from 'lucide-react'
 import './App.css'
 
 import { useState, useEffect } from 'react'
@@ -12,25 +12,8 @@ function App() {
   const [isSetup, setIsSetup] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [onLeetCodePage, setOnLeetCodePage] = useState(false);
 
-  useEffect(() => {
-    if (window.chrome && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ test: 'hello' }, function() {
-        if (chrome.runtime.lastError) {
-          console.error('Storage error:', chrome.runtime.lastError);
-        } else {
-          console.log('Test key saved');
-          chrome.storage.local.get(['test'], (result) => {
-            console.log('Test key retrieved:', result);
-          });
-        }
-      });
-    } else {
-      console.log('chrome.storage.local is NOT available');
-    }
-  }, []); // <-- only runs once on mount
-
-  
   // Helper to validate API key
   const validateKey = async (key) => {
     try {
@@ -40,7 +23,6 @@ function App() {
         },
       })
       if (res.status === 401) return false
-      // setIsSetup(true)
       return true
     } catch {
       return false
@@ -48,6 +30,17 @@ function App() {
   }
 
   useEffect(() => {
+    // Check if on a LeetCode problem page
+    if (window.chrome && chrome.tabs) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const currentTab = tabs[0];
+        if (currentTab && currentTab.url) {
+          const isProblemPage = /https:\/\/leetcode\.com\/(problems|problem)\/.*/.test(currentTab.url);
+          setOnLeetCodePage(isProblemPage);
+        }
+      });
+    }
+
     // On mount, get key from chrome.storage.local
     if (window.chrome && chrome.storage && chrome.storage.local) {
       chrome.storage.local.get(['openai_api_key'], async (result) => {
@@ -93,6 +86,18 @@ function App() {
     }
   }
 
+  const handleOpenApiKeyLink = (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: "https://platform.openai.com/account/api-keys" });
+  };
+
+  const handleOpenChat = () => {
+    // Send message to background script to toggle chat
+    if (onLeetCodePage) {
+      chrome.runtime.sendMessage({ action: 'toggleChat' });
+    }
+  }
+
   if (isSetup) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-4">
@@ -102,19 +107,43 @@ function App() {
           </div>
           
           <h1 className="text-2xl font-bold text-gray-800 mb-3">Setup Complete!</h1>
-          <p className="text-gray-600 mb-6">
-            Thank you for configuring your API key. Your AI Leetcode Debugger is now ready to use.
-          </p>
           
-          <div className="bg-blue-50 p-4 rounded-lg mb-6">
-            <p className="text-sm text-blue-800">
-              <strong>Next:</strong> Visit any Leetcode problem page and the debugger will automatically assist you with your solutions.
-            </p>
-          </div>
+          {onLeetCodePage ? (
+            <>
+              <p className="text-gray-600 mb-6">
+                You are on a LeetCode problem page. The AI debugger is ready to help!
+              </p>
+              <button
+                onClick={handleOpenChat}
+                className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors mb-4 flex items-center justify-center gap-2"
+              >
+                🚀 Open Chat
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-600 mb-6">
+                Navigate to a LeetCode problem page to activate the AI chat.
+              </p>
+              <div className="bg-yellow-50 p-4 rounded-lg mb-6 text-yellow-800 flex items-center gap-3">
+                <Info className="w-6 h-6 flex-shrink-0" />
+                <p className="text-sm text-left">
+                  The AI chat feature is only available on LeetCode problem pages.
+                </p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-gray-800 mb-2">How to use:</h3>
+                <ol className="text-sm text-gray-600 space-y-1 text-left">
+                  <li>1. Go to any Leetcode problem page</li>
+                  <li>2. Look for the 🤖 icon in the bottom-right corner</li>
+                  <li>3. Click it to open the AI chat interface</li>
+                  <li>4. Ask questions about your code!</li>
+                </ol>
+              </div>
+            </>
+          )}
           
-          <p className="text-gray-500 text-sm">
-            You can now close this tab. Happy coding! 🚀
-          </p>
+          
         </div>
       </div>
     )
@@ -159,7 +188,13 @@ function App() {
           </button>
           
         </div>
-        <a href="https://platform.openai.com/account/api-keys" className='text-sm text-blue-500'>Get API key</a>
+        <a 
+          href="https://platform.openai.com/account/api-keys" 
+          onClick={handleOpenApiKeyLink}
+          className='text-sm text-blue-500 hover:underline'
+        >
+          Get API key
+        </a>
         
         <div className="mt-6 p-4 bg-gray-50 rounded-lg">
           <p className="text-sm text-gray-600">

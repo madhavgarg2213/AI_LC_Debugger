@@ -1,10 +1,38 @@
 {
     "manifest_version": 3,
-    "name": "AI LC Debugger",
-    "version": "1.0",
-    "description": "Debug your Leetcode problems",
-    "permissions": ["activeTab", "scripting", "storage"],
+    "name": "AI Leetcode Debugger",
+    "version": "1.0.0",
+    "description": "AI-powered debugging assistance for Leetcode problems. Get help optimizing and debugging your solutions with a floating chat interface.",
+    "permissions": [
+        "activeTab", 
+        "scripting", 
+        "storage",
+        "tabs"
+    ],
+    "host_permissions": [
+        "https://leetcode.com/*",
+        "https://api.openai.com/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://leetcode.com/problems/*",
+                "https://leetcode.com/problem/*"
+            ],
+            "js": ["contentScript.js"],
+            "run_at": "document_end"
+        }
+    ],
     "action": {
-        "default_popup": "index.html"
+        "default_popup": "index.html",
+        "default_title": "AI Leetcode Debugger"
+    },
+    "icons": {
+        "16": "vite.svg",
+        "48": "vite.svg",
+        "128": "vite.svg"
     }
 }
