@@ -51,6 +51,7 @@ function App() {
           setLoading(false)
           if (valid) {
             setApiKey(savedKey)
+            setInputKey(savedKey)
             setIsSetup(true)
           } else {
             setError('Invalid API key. Please enter a valid key.')

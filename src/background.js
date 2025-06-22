@@ -13,6 +13,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const activeTab = tabs[0];
       if (activeTab && activeTab.url && LEETCODE_PROBLEM_URL_PATTERN.test(activeTab.url)) {
+        //send a message to the content script to toggle the chat
         chrome.tabs.sendMessage(activeTab.id, { action: 'toggleChat' }, (response) => {
           if (chrome.runtime.lastError) {
             console.log('Content script not ready, injecting...');

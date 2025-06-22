@@ -1,491 +1,986 @@
-// Content script that runs on Leetcode pages
-let chatIcon = null;
-let chatWindow = null;
-let isChatOpen = false;
-
-// Create and inject the floating chat icon
-function createChatIcon() {
-  // Remove existing icon if it exists
-  if (chatIcon) {
-    chatIcon.remove();
+(() => {
+  // Guard against multiple injections
+  if (window.hasRun) {
+    return;
   }
+  window.hasRun = true;
 
-  chatIcon = document.createElement('div');
-  chatIcon.id = 'ai-leetcode-debugger-icon';
-  chatIcon.innerHTML = `
-    <div style="
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      width: 60px;
-      height: 60px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      z-index: 10000;
-      transition: all 0.3s ease;
-      font-size: 24px;
-      color: white;
-      user-select: none;
-    " title="AI Leetcode Debugger - Click to chat">
-      🤖
-    </div>
-  `;
+  let lastApiCall = 0;
+const API_CALL_DELAY = 60000; // 60 seconds between API calls
+let apiCallQueue = [];
+let isProcessingQueue = false;
 
-  // Add hover effects
-  const iconElement = chatIcon.querySelector('div');
-  iconElement.addEventListener('mouseenter', () => {
-    iconElement.style.transform = 'scale(1.1)';
-    iconElement.style.boxShadow = '0 6px 20px rgba(0,0,0,0.2)';
-  });
-  
-  iconElement.addEventListener('mouseleave', () => {
-    iconElement.style.transform = 'scale(1)';
-    iconElement.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-  });
+  // Content script that runs on Leetcode pages
+  let chatIcon = null;
+  let chatWindow = null;
+  let isChatOpen = false;
+  let userCode = ''; // Store user's pasted code
+  let eventListenersAttached = false; // Flag to prevent multiple event listeners
+  let isAnalyzing = false; // Flag to prevent multiple API calls
 
-  // Add click handler
-  iconElement.addEventListener('click', toggleChat);
-
-  document.body.appendChild(chatIcon);
-}
-
-// Create the chat window
-function createChatWindow() {
-  if (chatWindow) {
-    chatWindow.remove();
-  }
-
-  chatWindow = document.createElement('div');
-  chatWindow.id = 'ai-leetcode-debugger-chat';
-  chatWindow.innerHTML = `
-    <div style="
-      position: fixed;
-      bottom: 100px;
-      right: 20px;
-      width: 380px;
-      height: 500px;
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.12);
-      z-index: 10001;
-      display: flex;
-      flex-direction: column;
-      border: 1px solid #e5e7eb;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      animation: slideIn 0.3s ease-out;
-    ">
-      <!-- Header -->
-      <div style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 16px;
-        border-radius: 12px 12px 0 0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      ">
-        <h3 style="margin: 0; font-size: 16px; font-weight: 600;">AI Leetcode Debugger</h3>
-        <button id="close-chat" style="
-          background: none;
-          border: none;
-          color: white;
-          cursor: pointer;
-          font-size: 18px;
-          padding: 0;
-          width: 24px;
-          height: 24px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 4px;
-          transition: background-color 0.2s;
-        " title="Close chat">×</button>
-      </div>
-      
-      <!-- Chat Messages -->
-      <div id="chat-messages" style="
-        flex: 1;
-        padding: 16px;
-        overflow-y: auto;
-        background: #f9fafb;
-        scrollbar-width: thin;
-        scrollbar-color: #cbd5e0 #f1f5f9;
-      ">
-        <div style="
-          background: #e3f2fd;
-          padding: 12px;
-          border-radius: 8px;
-          margin-bottom: 12px;
-          font-size: 14px;
-          color: #1976d2;
-          border-left: 4px solid #2196f3;
-        ">
-          👋 Hi! I'm your AI coding assistant. I can help you debug and optimize your Leetcode solutions. What would you like help with?
-        </div>
-      </div>
-      
-      <!-- Input Area -->
-      <div style="
-        padding: 16px;
-        border-top: 1px solid #e5e7eb;
-        background: white;
-        border-radius: 0 0 12px 12px;
-      ">
-        <div style="display: flex; gap: 8px;">
-          <input id="chat-input" type="text" placeholder="Ask me anything about your code..." style="
-            flex: 1;
-            padding: 10px 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 14px;
-            outline: none;
-            transition: border-color 0.2s;
-          " />
-          <button id="send-message" style="
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: background-color 0.2s;
-          ">Send</button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  // Add CSS animations
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-    
-    #chat-messages::-webkit-scrollbar {
-      width: 6px;
-    }
-    
-    #chat-messages::-webkit-scrollbar-track {
-      background: #f1f5f9;
-    }
-    
-    #chat-messages::-webkit-scrollbar-thumb {
-      background: #cbd5e0;
-      border-radius: 3px;
-    }
-    
-    #chat-messages::-webkit-scrollbar-thumb:hover {
-      background: #a0aec0;
-    }
-  `;
-  document.head.appendChild(style);
-
-  // Add event listeners
-  const closeBtn = chatWindow.querySelector('#close-chat');
-  const sendBtn = chatWindow.querySelector('#send-message');
-  const input = chatWindow.querySelector('#chat-input');
-
-  closeBtn.addEventListener('click', toggleChat);
-  closeBtn.addEventListener('mouseenter', () => {
-    closeBtn.style.backgroundColor = 'rgba(255,255,255,0.1)';
-  });
-  closeBtn.addEventListener('mouseleave', () => {
-    closeBtn.style.backgroundColor = 'transparent';
-  });
-
-  sendBtn.addEventListener('click', sendMessage);
-  sendBtn.addEventListener('mouseenter', () => {
-    sendBtn.style.backgroundColor = '#5a67d8';
-  });
-  sendBtn.addEventListener('mouseleave', () => {
-    sendBtn.style.backgroundColor = '#667eea';
-  });
-
-  input.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      sendMessage();
-    }
-  });
-
-  input.addEventListener('focus', () => {
-    input.style.borderColor = '#667eea';
-  });
-
-  input.addEventListener('blur', () => {
-    input.style.borderColor = '#d1d5db';
-  });
-
-  document.body.appendChild(chatWindow);
-  
-  // Focus the input
-  setTimeout(() => {
-    input.focus();
-  }, 100);
-}
-
-// Toggle chat window
-function toggleChat() {
-  if (!isChatOpen) {
-    createChatWindow();
-    isChatOpen = true;
-    // Hide the icon when chat is open
+  // Create and inject the floating chat icon
+  function createChatIcon() {
+    // Remove existing icon if it exists
     if (chatIcon) {
-      chatIcon.style.display = 'none';
+      chatIcon.remove();
     }
-  } else {
+
+    chatIcon = document.createElement('div');
+    chatIcon.id = 'ai-leetcode-debugger-icon';
+    chatIcon.innerHTML = `
+      <div style="
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 10000;
+        transition: all 0.3s ease;
+        font-size: 24px;
+        color: white;
+        user-select: none;
+      " title="AI Leetcode Debugger - Click to chat">
+        ��
+      </div>
+    `;
+
+    // Add hover effects
+    const iconElement = chatIcon.querySelector('div');
+    iconElement.addEventListener('mouseenter', () => {
+      iconElement.style.transform = 'scale(1.1)';
+      iconElement.style.boxShadow = '0 6px 20px rgba(0,0,0,0.2)';
+    });
+    
+    iconElement.addEventListener('mouseleave', () => {
+      iconElement.style.transform = 'scale(1)';
+      iconElement.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    });
+
+    // Add click handler
+    iconElement.addEventListener('click', toggleChat);
+
+    document.body.appendChild(chatIcon);
+  }
+
+  // Create the chat window
+  function createChatWindow() {
     if (chatWindow) {
       chatWindow.remove();
-      chatWindow = null;
     }
-    isChatOpen = false;
-    // Show the icon when chat is closed
-    if (chatIcon) {
-      chatIcon.style.display = 'block';
+
+    chatWindow = document.createElement('div');
+    chatWindow.id = 'ai-leetcode-debugger-chat';
+    chatWindow.innerHTML = `
+      <div style="
+        position: fixed;
+        bottom: 100px;
+        right: 20px;
+        width: 380px;
+        height: 500px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+        z-index: 10001;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #e5e7eb;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        animation: slideIn 0.3s ease-out;
+      ">
+        <!-- Header -->
+        <div style="
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 16px;
+          border-radius: 12px 12px 0 0;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        ">
+          <h3 style="margin: 0; font-size: 16px; font-weight: 600;">AI Leetcode Debugger</h3>
+          <button id="close-chat" style="
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+          " title="Close chat">×</button>
+        </div>
+        
+        <!-- Chat Messages -->
+        <div id="chat-messages" style="
+          flex: 1;
+          padding: 16px;
+          overflow-y: auto;
+          background: #f9fafb;
+          scrollbar-width: thin;
+          scrollbar-color: #cbd5e0 #f1f5f9;
+        ">
+          <div id="welcome-message" style="
+            background: #e3f2fd;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            color: #1976d2;
+            border-left: 4px solid #2196f3;
+          ">
+            👋 Hi! Nice to see you solving "<span id="problem-title"></span>"! Please paste your code first, then I can help you debug and optimize your solution!
+          </div>
+        </div>
+        
+        <!-- Code Input Area -->
+        <div id="code-input-section" style="
+          padding: 16px;
+          border-top: 1px solid #e5e7eb;
+          background: #f9fafb;
+          display: block;
+        ">
+          <textarea id="code-input" placeholder="Paste your code here..." style="
+            width: 100%;
+            height: 80px;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            resize: vertical;
+            outline: none;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+          "></textarea>
+          <button id="submit-code" style="
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 8px;
+            transition: background-color 0.2s;
+          ">Submit Code</button>
+        </div>
+        
+        <!-- Chat Input Area -->
+        <div id="chat-input-section" style="
+          padding: 16px;
+          border-top: 1px solid #e5e7eb;
+          background: white;
+          border-radius: 0 0 12px 12px;
+          display: none;
+        ">
+          <div style="display: flex; gap: 8px;">
+            <input id="chat-input" type="text" placeholder="Ask me anything about your code..." style="
+              flex: 1;
+              padding: 10px 12px;
+              border: 1px solid #d1d5db;
+              border-radius: 6px;
+              font-size: 14px;
+              outline: none;
+              transition: border-color 0.2s;
+            " />
+            <button id="send-message" style="
+              background: #667eea;
+              color: white;
+              border: none;
+              padding: 10px 16px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 14px;
+              font-weight: 500;
+              transition: background-color 0.2s;
+            ">Send</button>
+          </div>
+          <button id="change-code" style="
+            background: #6b7280;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 8px;
+            transition: background-color 0.2s;
+          ">Change Code</button>
+        </div>
+      </div>
+    `;
+
+    // Add CSS animations
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      
+      #chat-messages::-webkit-scrollbar {
+        width: 6px;
+      }
+      
+      #chat-messages::-webkit-scrollbar-track {
+        background: #f1f5f9;
+      }
+      
+      #chat-messages::-webkit-scrollbar-thumb {
+        background: #cbd5e0;
+        border-radius: 3px;
+      }
+      
+      #chat-messages::-webkit-scrollbar-thumb:hover {
+        background: #a0aec0;
+      }
+    `;
+    document.head.appendChild(style);
+
+    // Add event listeners
+    setupEventListeners();
+
+    document.body.appendChild(chatWindow);
+    
+    // Set the problem title in the welcome message
+    const problemTitle = getTitleFromCurrentPage();
+    const titleElement = chatWindow.querySelector('#problem-title');
+    if (titleElement) {
+      titleElement.textContent = problemTitle;
+    }
+    
+    // Focus the code input initially
+    setTimeout(() => {
+      const codeInput = document.querySelector('#code-input');
+      if (codeInput) {
+        codeInput.focus();
+      }
+    }, 100);
+  }
+
+  // Setup all event listeners
+  function setupEventListeners() {
+    // Prevent multiple event listener attachments
+    if (eventListenersAttached) {
+      console.log('Event listeners already attached, skipping...');
+      return;
+    }
+    
+    console.log('Setting up event listeners...');
+    const closeBtn = chatWindow.querySelector('#close-chat');
+    const submitCodeBtn = chatWindow.querySelector('#submit-code');
+    const sendBtn = chatWindow.querySelector('#send-message');
+    const changeCodeBtn = chatWindow.querySelector('#change-code');
+    const chatInput = chatWindow.querySelector('#chat-input');
+    const codeInput = chatWindow.querySelector('#code-input');
+
+    // Close button
+    closeBtn.addEventListener('click', toggleChat);
+    closeBtn.addEventListener('mouseenter', () => {
+      closeBtn.style.backgroundColor = 'rgba(255,255,255,0.1)';
+    });
+    closeBtn.addEventListener('mouseleave', () => {
+      closeBtn.style.backgroundColor = 'transparent';
+    });
+
+    // Submit code button
+    submitCodeBtn.addEventListener('click', submitCode);
+    submitCodeBtn.addEventListener('mouseenter', () => {
+      submitCodeBtn.style.backgroundColor = '#059669';
+    });
+    submitCodeBtn.addEventListener('mouseleave', () => {
+      submitCodeBtn.style.backgroundColor = '#10b981';
+    });
+
+    // Send message button
+    if (sendBtn) {
+      sendBtn.addEventListener('click', sendMessage);
+      sendBtn.addEventListener('mouseenter', () => {
+        sendBtn.style.backgroundColor = '#5a67d8';
+      });
+      sendBtn.addEventListener('mouseleave', () => {
+        sendBtn.style.backgroundColor = '#667eea';
+      });
+    }
+
+    // Change code button
+    if (changeCodeBtn) {
+      changeCodeBtn.addEventListener('click', showCodeInput);
+      changeCodeBtn.addEventListener('mouseenter', () => {
+        changeCodeBtn.style.backgroundColor = '#4b5563';
+      });
+      changeCodeBtn.addEventListener('mouseleave', () => {
+        changeCodeBtn.style.backgroundColor = '#6b7280';
+      });
+    }
+
+    // Chat input enter key
+    if (chatInput) {
+      chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          sendMessage();
+        }
+      });
+
+      chatInput.addEventListener('focus', () => {
+        chatInput.style.borderColor = '#667eea';
+      });
+
+      chatInput.addEventListener('blur', () => {
+        chatInput.style.borderColor = '#d1d5db';
+      });
+    }
+
+    // Code input focus effects
+    if (codeInput) {
+      codeInput.addEventListener('focus', () => {
+        codeInput.style.borderColor = '#10b981';
+      });
+
+      codeInput.addEventListener('blur', () => {
+        codeInput.style.borderColor = '#d1d5db';
+      });
+    }
+    
+    eventListenersAttached = true;
+    console.log('Event listeners attached successfully');
+  }
+
+  // Submit code function
+  async function submitCode() {
+    console.log('submitCode function called');
+    
+    // Prevent multiple simultaneous calls
+    if (isAnalyzing) {
+      console.log('Analysis already in progress, ignoring this call');
+      return;
+    }
+    
+    const codeInput = document.querySelector('#code-input');
+    const messagesContainer = document.querySelector('#chat-messages');
+    const code = codeInput.value.trim();
+    
+    if (!code) {
+      alert('Please paste your code first!');
+      return;
+    }
+
+    // Store the user's code
+    userCode = code;
+    console.log('Code stored, length:', code.length);
+
+    // Add code submission message
+    const codeMessageDiv = document.createElement('div');
+    codeMessageDiv.style.cssText = `
+      background: #f0fdf4;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      color: #166534;
+      border-left: 4px solid #10b981;
+    `;
+    codeMessageDiv.innerHTML = `
+      ✅ <strong>Code submitted successfully!</strong><br>
+      <div style="margin-top: 8px; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; background: white; padding: 8px; border-radius: 4px; font-size: 12px; max-height: 100px; overflow-y: auto; border: 1px solid #d1fae5;">
+        ${code.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}
+      </div>
+      Analyzing your code automatically...
+    `;
+    messagesContainer.appendChild(codeMessageDiv);
+
+    // Switch to chat mode
+    showChatInput();
+
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    console.log('About to call autoAnalyzeCode in 1 second...');
+    // Add a small delay to prevent rapid API calls
+    setTimeout(async () => {
+      console.log('Calling autoAnalyzeCode now...');
+      await autoAnalyzeCode();
+    }, 1000);
+  }
+
+  // Auto-analyze code function
+  async function autoAnalyzeCode() {
+    console.log('autoAnalyzeCode function called');
+    
+    // Prevent multiple simultaneous API calls
+    if (isAnalyzing) {
+      console.log('Analysis already in progress, skipping...');
+      return;
+    }
+    
+    isAnalyzing = true;
+    console.log('Setting isAnalyzing to true');
+    
+    const messagesContainer = document.querySelector('#chat-messages');
+    
+    // Add loading indicator for auto-analysis
+    const loadingDiv = document.createElement('div');
+    loadingDiv.style.cssText = `
+      background: #f3f4f6;
+      padding: 12px;
+      border-radius: 8px 8px 8px 4px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      color: #6b7280;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    `;
+    
+    // Check if we can make an API call
+    if (!canMakeApiCall()) {
+      const waitTime = API_CALL_DELAY - (Date.now() - lastApiCall);
+      loadingDiv.innerHTML = `⏳ Rate limit active. Next API call available in ${Math.ceil(waitTime/1000)} seconds...`;
+      messagesContainer.appendChild(loadingDiv);
+      
+      // Update countdown
+      const countdown = setInterval(() => {
+        const remainingTime = API_CALL_DELAY - (Date.now() - lastApiCall);
+        if (remainingTime <= 0) {
+          clearInterval(countdown);
+          loadingDiv.innerHTML = '<div style="width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top: 2px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite;"></div>🔍 Analyzing your code...';
+        } else {
+          loadingDiv.innerHTML = `⏳ Rate limit active. Next API call available in ${Math.ceil(remainingTime/1000)} seconds...`;
+        }
+      }, 1000);
+      
+      // Wait for rate limit to clear
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      clearInterval(countdown);
+    }
+    
+    loadingDiv.innerHTML = '<div style="width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top: 2px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite;"></div>🔍 Analyzing your code...';
+    if (!messagesContainer.contains(loadingDiv)) {
+      messagesContainer.appendChild(loadingDiv);
+    }
+  
+    // Add spinning animation if not exists
+    if (!document.querySelector('#spin-animation')) {
+      const spinStyle = document.createElement('style');
+      spinStyle.id = 'spin-animation';
+      spinStyle.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+      document.head.appendChild(spinStyle);
+    }
+  
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  
+    try {
+      // Queue the API call to respect rate limits
+      const result = await queueApiCall(async () => {
+        console.log('Checking API key...');
+        const apiKey = await checkApiKey();
+  
+        if (!apiKey) {
+          throw new Error('OpenAI API key not found. Please set up your API key in the extension popup first.');
+        }
+        console.log(`API Key found. Length: ${apiKey.length}`);
+  
+        // Get current problem title
+        const title = getTitleFromCurrentPage();
+        console.log('Problem title:', title);
+  
+        // Prepare the auto-analysis prompt (shortened to reduce token usage)
+        const prompt = `Analyze this Leetcode solution for "${title}":
+  
+  \`\`\`
+  ${userCode}
+  \`\`\`
+  
+  Provide brief feedback on:
+  1. Correctness
+  2. Issues/bugs
+  3. Suggestions
+  4. Complexity
+  
+  Keep response under 300 words.`;
+  
+        console.log('Making API request to OpenAI...');
+        // Send to OpenAI with reduced token limits
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-3.5-turbo',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a helpful coding assistant. Keep responses brief and focused.'
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            max_tokens: 500, // Reduced from 1200
+            temperature: 0.3 // Reduced for more consistent responses
+          })
+        });
+  
+        console.log('API response status:', response.status);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.log('API error data:', errorData);
+          let errorMessage = `API request failed (${response.status})`;
+          
+          if (response.status === 401) {
+            errorMessage = 'Invalid API key. Please check your OpenAI API key.';
+          } else if (response.status === 429) {
+            errorMessage = 'Rate limit exceeded. Please wait 2-3 minutes before trying again.';
+          } else if (response.status === 402) {
+            errorMessage = 'Insufficient credits. Please add credits to your OpenAI account.';
+          } else if (errorData.error?.message) {
+            errorMessage += `: ${errorData.error.message}`;
+          }
+          
+          throw new Error(errorMessage);
+        }
+  
+        const data = await response.json();
+        return data.choices[0]?.message?.content || 'Sorry, I could not analyze your code automatically.';
+      });
+  
+      // Remove loading indicator
+      loadingDiv.remove();
+  
+      // Add AI analysis response
+      const analysisDiv = document.createElement('div');
+      analysisDiv.style.cssText = `
+        background: #f0f9ff;
+        padding: 14px;
+        border-radius: 8px 8px 8px 4px;
+        margin-bottom: 12px;
+        font-size: 14px;
+        color: #0c4a6e;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        border-left: 4px solid #0ea5e9;
+        line-height: 1.5;
+      `;
+      analysisDiv.innerHTML = `🤖 <strong>Code Analysis:</strong><br><br>${result}`;
+      messagesContainer.appendChild(analysisDiv);
+  
+      // Add follow-up message
+      const followUpDiv = document.createElement('div');
+      followUpDiv.style.cssText = `
+        background: #fefce8;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        font-size: 14px;
+        color: #854d0e;
+        border-left: 4px solid #eab308;
+      `;
+      followUpDiv.textContent = '💡 Feel free to ask follow-up questions (note: rate limits apply - 1 question per minute).';
+      messagesContainer.appendChild(followUpDiv);
+  
+    } catch (error) {
+      console.error('Error in auto-analysis:', error);
+      
+      // Remove loading indicator
+      loadingDiv.remove();
+  
+      // Add error message with more specific guidance
+      const errorDiv = document.createElement('div');
+      errorDiv.style.cssText = `
+        background: #fef2f2;
+        padding: 12px;
+        border-radius: 8px 8px 8px 4px;
+        margin-bottom: 12px;
+        font-size: 14px;
+        color: #dc2626;
+        border-left: 4px solid #ef4444;
+        line-height: 1.5;
+      `;
+      
+      let errorMessage = error.message;
+      if (error.message.includes('Rate limit')) {
+        errorMessage += '<br><br><strong>💡 Tips:</strong><br>• Free tier: 3 requests/minute<br>• Wait 2-3 minutes between requests<br>• Consider upgrading to paid plan for higher limits';
+      }
+      
+      errorDiv.innerHTML = `❌ <strong>Analysis failed:</strong> ${errorMessage}`;
+      messagesContainer.appendChild(errorDiv);
+    } finally {
+      // Always reset the flag
+      isAnalyzing = false;
+      console.log('Setting isAnalyzing to false');
+    }
+  
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+
+  // Show chat input from the code input system
+  function showChatInput() {
+    const codeSection = document.querySelector('#code-input-section');
+    const chatSection = document.querySelector('#chat-input-section');
+    
+    if (codeSection) codeSection.style.display = 'none';
+    if (chatSection) chatSection.style.display = 'block';
+    
+    // Focus chat input
+    setTimeout(() => {
+      const chatInput = document.querySelector('#chat-input');
+      if (chatInput) {
+        chatInput.focus();
+      }
+    }, 100);
+  }
+
+  // Show code input (hide chat input)
+  function showCodeInput() {
+    const codeSection = document.querySelector('#code-input-section');
+    const chatSection = document.querySelector('#chat-input-section');
+    
+    if (codeSection) codeSection.style.display = 'block';
+    if (chatSection) chatSection.style.display = 'none';
+    
+    // Clear previous code
+    const codeInput = document.querySelector('#code-input');
+    if (codeInput) {
+      codeInput.value = userCode; // Pre-fill with current code
+      codeInput.focus();
     }
   }
-}
 
-// Get current code from the page
-function getCurrentCode() {
-  // Try multiple selectors to find the code editor
-  const selectors = [
-    '.monaco-editor textarea',
-    '.monaco-editor .view-lines',
-    'textarea[data-cy="code-editor"]',
-    '.CodeMirror textarea',
-    'pre code',
-    'textarea',
-    '.ace_editor'
-  ];
-
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element) {
-      if (element.tagName === 'TEXTAREA') {
-        return element.value;
-      } else if (element.textContent) {
-        return element.textContent;
+  // Toggle chat window
+  function toggleChat() {
+    if (!isChatOpen) {
+      createChatWindow();
+      isChatOpen = true;
+      // Hide the icon when chat is open
+      if (chatIcon) {
+        chatIcon.style.display = 'none';
+      }
+    } else {
+      if (chatWindow) {
+        chatWindow.remove();
+        chatWindow = null;
+      }
+      isChatOpen = false;
+      eventListenersAttached = false; // Reset flag when chat is closed
+      // Show the icon when chat is closed
+      if (chatIcon) {
+        chatIcon.style.display = 'block';
       }
     }
   }
 
-  // Fallback: try to get code from any pre/code blocks
-  const codeBlocks = document.querySelectorAll('pre code, .code-block');
-  if (codeBlocks.length > 0) {
-    return Array.from(codeBlocks).map(block => block.textContent).join('\n\n');
+  // Get problem title from URL
+  function getTitleFromCurrentPage() {
+    const match = window.location.pathname.match(/\/problems\/([\w-]+)\//);
+    if (!match) return 'Leetcode Problem';
+
+    const slug = match[1];
+    return slug
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
   }
 
-  return 'No code detected on the page.';
-}
+  // Check API key availability
+  async function checkApiKey() {
+    try {
+      const result = await chrome.storage.local.get(['openai_api_key']);
+      const apiKey = result.openai_api_key || null;
+      
+      if (apiKey && !apiKey.startsWith('sk-')) {
+        console.error('Invalid API key format. Must start with sk-');
+        return null;
+      }
+      
+      return apiKey;
+    } catch (error) {
+      console.error('Error checking API key:', error);
+      return null;
+    }
+  }
+  function canMakeApiCall() {
+    const now = Date.now();
+    const timeSinceLastCall = now - lastApiCall;
+    return timeSinceLastCall >= API_CALL_DELAY;
+  }
+  function queueApiCall(callFunction) {
+    return new Promise((resolve, reject) => {
+      apiCallQueue.push({ callFunction, resolve, reject });
+      processApiQueue();
+    });
+  }
 
-// Get problem information
-function getProblemInfo() {
-  const title = document.querySelector('h1')?.textContent || 
-                document.querySelector('[data-cy="question-title"]')?.textContent ||
-                'Leetcode Problem';
-  
-  const difficulty = document.querySelector('[data-cy="question-difficulty"]')?.textContent ||
-                    document.querySelector('.difficulty-label')?.textContent ||
-                    '';
-  
-  return { title, difficulty };
-}
+  async function processApiQueue() {
+    if (isProcessingQueue || apiCallQueue.length === 0) {
+      return;
+    }
+    
+    isProcessingQueue = true;
+    
+    while (apiCallQueue.length > 0) {
+      if (!canMakeApiCall()) {
+        const waitTime = API_CALL_DELAY - (Date.now() - lastApiCall);
+        console.log(`Rate limit: waiting ${Math.ceil(waitTime/1000)} seconds before next API call`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+      
+      const { callFunction, resolve, reject } = apiCallQueue.shift();
+      
+      try {
+        lastApiCall = Date.now();
+        const result = await callFunction();
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+      
+      // Add a small buffer between calls
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    isProcessingQueue = false;
+  }
 
-// Send message function
-async function sendMessage() {
-  const input = document.querySelector('#chat-input');
-  const messagesContainer = document.querySelector('#chat-messages');
-  const message = input.value.trim();
-  
-  if (!message) return;
+  // Send message function
+  async function sendMessage() {
+    const input = document.querySelector('#chat-input');
+    const messagesContainer = document.querySelector('#chat-messages');
+    const message = input.value.trim();
+    
+    if (!message) return;
 
-  // Add user message
-  const userMessageDiv = document.createElement('div');
-  userMessageDiv.style.cssText = `
-    background: #667eea;
-    color: white;
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 12px;
-    font-size: 14px;
-    align-self: flex-end;
-    max-width: 80%;
-    margin-left: auto;
-    word-wrap: break-word;
-  `;
-  userMessageDiv.textContent = message;
-  messagesContainer.appendChild(userMessageDiv);
-
-  // Clear input
-  input.value = '';
-
-  // Add loading indicator
-  const loadingDiv = document.createElement('div');
-  loadingDiv.style.cssText = `
-    background: #f3f4f6;
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 12px;
-    font-size: 14px;
-    color: #6b7280;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  `;
-  loadingDiv.innerHTML = '<div style="width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top: 2px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite;"></div>🤔 Thinking...';
-  messagesContainer.appendChild(loadingDiv);
-
-  // Add spinning animation
-  const spinStyle = document.createElement('style');
-  spinStyle.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
-  document.head.appendChild(spinStyle);
-
-  // Scroll to bottom
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-  try {
-    // Get API key from storage
-    const result = await chrome.storage.local.get(['openai_api_key']);
-    const apiKey = result.openai_api_key;
-
-    if (!apiKey) {
-      throw new Error('API key not found. Please set up your API key in the extension popup.');
+    // Check if user has submitted code
+    if (!userCode) {
+      const warningDiv = document.createElement('div');
+      warningDiv.style.cssText = `
+        background: #fef3c7;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        font-size: 14px;
+        color: #92400e;
+        border-left: 4px solid #f59e0b;
+      `;
+      warningDiv.textContent = '⚠️ Please submit your code first before asking questions!';
+      messagesContainer.appendChild(warningDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      return;
     }
 
-    // Get current problem context
-    const { title, difficulty } = getProblemInfo();
-    const currentCode = getCurrentCode();
+    // Add user message
+    const userMessageDiv = document.createElement('div');
+    userMessageDiv.style.cssText = `
+      background: #667eea;
+      color: white;
+      padding: 12px;
+      border-radius: 8px 8px 4px 8px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      align-self: flex-end;
+      max-width: 80%;
+      margin-left: auto;
+      word-wrap: break-word;
+    `;
+    userMessageDiv.textContent = message;
+    messagesContainer.appendChild(userMessageDiv);
 
-    // Prepare the prompt
-    const prompt = `You are an AI coding assistant helping with a Leetcode problem: "${title}"${difficulty ? ` (${difficulty})` : ''}.
+    // Clear input
+    input.value = '';
 
-Current code:
+    // Add loading indicator
+    const loadingDiv = document.createElement('div');
+    loadingDiv.style.cssText = `
+      background: #f3f4f6;
+      padding: 12px;
+      border-radius: 8px 8px 8px 4px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      color: #6b7280;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    `;
+    loadingDiv.innerHTML = '<div style="width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top: 2px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite;"></div>🤔 Analyzing your code...';
+    messagesContainer.appendChild(loadingDiv);
+
+    // Add spinning animation if not exists
+    if (!document.querySelector('#spin-animation')) {
+      const spinStyle = document.createElement('style');
+      spinStyle.id = 'spin-animation';
+      spinStyle.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+      document.head.appendChild(spinStyle);
+    }
+
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    try {
+      // Check API key
+      const apiKey = await checkApiKey();
+
+      if (!apiKey) {
+        throw new Error('OpenAI API key not found. Please set up your API key in the extension popup first.');
+      }
+
+      // Get current problem title
+      const title = getTitleFromCurrentPage();
+
+      // Prepare the prompt
+      const prompt = `You are an AI coding assistant helping with a Leetcode problem: "${title}".
+
+User's code:
 \`\`\`
-${currentCode}
+${userCode}
 \`\`\`
 
 User question: ${message}
 
 Please provide a helpful response that includes:
-1. Analysis of the current code (if any)
-2. Suggestions for improvement
-3. Specific debugging tips if needed
-4. Code examples if relevant
+1. Analyze if the logic of the code is correct
+2. If correct, identify what issues might exist (syntax, edge cases, efficiency, etc.)
+3. If incorrect, provide specific corrections to the existing code (don't rewrite everything from scratch)
+4. If the approach is completely wrong, suggest trying a different approach
 
-Keep your response concise, actionable, and focused on helping the user solve the problem.`;
+Keep your response concise, actionable, and focused on helping the user solve the problem step by step.`;
 
-    // Send to OpenAI
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 800,
-        temperature: 0.7
-      })
-    });
+      // Send to OpenAI
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful coding assistant specializing in debugging and optimizing Leetcode solutions. Always be constructive and provide specific, actionable feedback.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 1000,
+          temperature: 0.7
+        })
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`API request failed: ${response.status} ${errorData.error?.message || ''}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        let errorMessage = `API request failed (${response.status})`;
+        
+        if (response.status === 401) {
+          errorMessage = 'Invalid API key. Please check your OpenAI API key in the extension popup.';
+        } else if (response.status === 429) {
+          errorMessage = 'Rate limit exceeded. Please wait 1-2 minutes and try again, or check your OpenAI usage limits.';
+        } else if (errorData.error?.message) {
+          errorMessage += `: ${errorData.error.message}`;
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      const aiResponse = data.choices[0]?.message?.content || 'Sorry, I could not generate a response.';
+
+      // Remove loading indicator
+      loadingDiv.remove();
+
+      // Add AI response
+      const aiMessageDiv = document.createElement('div');
+      aiMessageDiv.style.cssText = `
+        background: #f3f4f6;
+        padding: 12px;
+        border-radius: 8px 8px 8px 4px;
+        margin-bottom: 12px;
+        font-size: 14px;
+        color: #374151;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        border-left: 4px solid #10b981;
+        line-height: 1.5;
+      `;
+      aiMessageDiv.textContent = aiResponse;
+      messagesContainer.appendChild(aiMessageDiv);
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      
+      // Remove loading indicator
+      loadingDiv.remove();
+
+      // Add error message
+      const errorDiv = document.createElement('div');
+      errorDiv.style.cssText = `
+        background: #fef2f2;
+        padding: 12px;
+        border-radius: 8px 8px 8px 4px;
+        margin-bottom: 12px;
+        font-size: 14px;
+        color: #dc2626;
+        border-left: 4px solid #ef4444;
+        line-height: 1.5;
+      `;
+      errorDiv.innerHTML = `❌ <strong>Error:</strong> ${error.message}`;
+      messagesContainer.appendChild(errorDiv);
     }
 
-    const data = await response.json();
-    const aiResponse = data.choices[0].message.content;
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
 
-    // Remove loading indicator
-    loadingDiv.remove();
-
-    // Add AI response
-    const aiMessageDiv = document.createElement('div');
-    aiMessageDiv.style.cssText = `
-      background: #f3f4f6;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      font-size: 14px;
-      color: #374151;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      border-left: 4px solid #10b981;
-    `;
-    aiMessageDiv.textContent = aiResponse;
-    messagesContainer.appendChild(aiMessageDiv);
-
-  } catch (error) {
-    console.error('Error sending message:', error);
+  // Initialize when the page loads
+  function init() {
+    // Check if we're on a Leetcode problem page
+    const isLeetcodeProblem = window.location.hostname.includes('leetcode.com') && 
+                             (window.location.pathname.includes('/problems/') || 
+                              window.location.pathname.includes('/problem/'));
     
-    // Remove loading indicator
-    loadingDiv.remove();
-
-    // Add error message
-    const errorDiv = document.createElement('div');
-    errorDiv.style.cssText = `
-      background: #fef2f2;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      font-size: 14px;
-      color: #dc2626;
-      border-left: 4px solid #ef4444;
-    `;
-    errorDiv.textContent = `❌ Error: ${error.message}`;
-    messagesContainer.appendChild(errorDiv);
-  }
-
-  // Scroll to bottom
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
-
-// Initialize when the page loads
-function init() {
-  // Check if we're on a Leetcode problem page
-  const isLeetcodeProblem = window.location.hostname.includes('leetcode.com') && 
-                           (window.location.pathname.includes('/problems/') || 
-                            window.location.pathname.includes('/problem/'));
-  
-  if (isLeetcodeProblem) {
-    // Wait for page to fully load
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', createChatIcon);
-    } else {
-      // Add a small delay to ensure the page is fully rendered
-      setTimeout(createChatIcon, 1000);
+    if (isLeetcodeProblem) {
+      // Wait for page to fully load
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', createChatIcon);
+      } else {
+        // Add a small delay to ensure the page is fully rendered
+        setTimeout(createChatIcon, 1000);
+      }
     }
   }
-}
 
-// Listen for messages from the popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'toggleChat') {
-    toggleChat();
-    sendResponse({ success: true });
-  }
-});
+  // Listen for messages from the popup
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'toggleChat') {
+      toggleChat();
+      sendResponse({ success: true });
+    }
+  });
 
-// Initialize
-init(); 
+  // Initialize
+  init();
+})();
