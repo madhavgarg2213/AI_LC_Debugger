@@ -48,7 +48,7 @@ let geminiModelName = null; // Cache the detected model name for the session
         color: white;
         user-select: none;
       " title="AI Leetcode Debugger - Click to chat">
-        ��
+        🤖
       </div>
     `;
 
