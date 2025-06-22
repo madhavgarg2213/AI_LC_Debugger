@@ -14,18 +14,15 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [onLeetCodePage, setOnLeetCodePage] = useState(false);
 
-  // Helper to validate API key
+  // Helper to validate Gemini API key
   const validateKey = async (key) => {
     try {
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: {
-          'Authorization': `Bearer ${key}`,
-        },
-      })
-      if (res.status === 401) return false
-      return true
+      // Gemini API key validation: try a simple models.list call
+      const res = await fetch('https://generativelanguage.googleapis.com/v1/models?key=' + key);
+      if (res.status === 403 || res.status === 401) return false;
+      return true;
     } catch {
-      return false
+      return false;
     }
   }
 
@@ -43,8 +40,8 @@ function App() {
 
     // On mount, get key from chrome.storage.local
     if (window.chrome && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['openai_api_key'], async (result) => {
-        const savedKey = result.openai_api_key || ''
+      chrome.storage.local.get(['gemini_api_key'], async (result) => {
+        const savedKey = result.gemini_api_key || ''
         if (savedKey) {
           setLoading(true)
           const valid = await validateKey(savedKey)
@@ -54,7 +51,7 @@ function App() {
             setInputKey(savedKey)
             setIsSetup(true)
           } else {
-            setError('Invalid API key. Please enter a valid key.')
+            setError('Invalid Gemini API key. Please enter a valid key.')
             setApiKey('')
             setIsSetup(false)
           }
@@ -70,11 +67,11 @@ function App() {
       const valid = await validateKey(inputKey.trim())
       setLoading(false)
       if (!valid) {
-        setError('Invalid API key. Please enter a valid key.')
+        setError('Invalid Gemini API key. Please enter a valid key.')
         return
       }
       if (window.chrome && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({ openai_api_key: inputKey.trim() }, function() {
+        chrome.storage.local.set({ gemini_api_key: inputKey.trim() }, function() {
           if (chrome.runtime.lastError) {
             console.error('Storage error:', chrome.runtime.lastError);
           } else {
@@ -89,7 +86,7 @@ function App() {
 
   const handleOpenApiKeyLink = (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: "https://platform.openai.com/account/api-keys" });
+    chrome.tabs.create({ url: "https://aistudio.google.com/app/apikey" });
   };
 
   const handleOpenChat = () => {
@@ -158,19 +155,19 @@ function App() {
             <Key className="w-10 h-10 text-blue-600" />
           </div>
           <h1 className="text-2xl font-bold text-gray-800 mb-2">AI Leetcode Debugger</h1>
-          <p className="text-gray-600">Enter your OpenAI API key to get started</p>
+          <p className="text-gray-600">Enter your Gemini API key to get started</p>
         </div>
         
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              OpenAI API Key
+              Gemini API Key
             </label>
             <input
               type="password"
               value={inputKey}
               onChange={(e) => setInputKey(e.target.value)}
-              placeholder="sk-..."
+              placeholder="AIza..."
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               onKeyPress={(e) => e.key === 'Enter' && handleSaveKey()}
               disabled={loading}
@@ -190,11 +187,11 @@ function App() {
           
         </div>
         <a 
-          href="https://platform.openai.com/account/api-keys" 
+          href="https://aistudio.google.com/app/apikey" 
           onClick={handleOpenApiKeyLink}
           className='text-sm text-blue-500 hover:underline'
         >
-          Get API key
+          Get Gemini API key
         </a>
         
         <div className="mt-6 p-4 bg-gray-50 rounded-lg">

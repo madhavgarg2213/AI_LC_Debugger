@@ -9,6 +9,7 @@
 const API_CALL_DELAY = 60000; // 60 seconds between API calls
 let apiCallQueue = [];
 let isProcessingQueue = false;
+let geminiModelName = null; // Cache the detected model name for the session
 
   // Content script that runs on Leetcode pages
   let chatIcon = null;
@@ -365,6 +366,22 @@ let isProcessingQueue = false;
     console.log('Event listeners attached successfully');
   }
 
+  // Helper to enable/disable chat input and send button
+  function setChatInputEnabled(enabled) {
+    const chatInput = document.querySelector('#chat-input');
+    const sendBtn = document.querySelector('#send-message');
+    if (chatInput) {
+      chatInput.disabled = !enabled;
+      chatInput.style.opacity = enabled ? '1' : '0.5';
+      chatInput.style.cursor = enabled ? 'text' : 'not-allowed';
+    }
+    if (sendBtn) {
+      sendBtn.disabled = !enabled;
+      sendBtn.style.opacity = enabled ? '1' : '0.5';
+      sendBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+    }
+  }
+
   // Submit code function
   async function submitCode() {
     console.log('submitCode function called');
@@ -410,7 +427,8 @@ let isProcessingQueue = false;
 
     // Switch to chat mode
     showChatInput();
-
+    // Disable chat input while analyzing
+    setChatInputEnabled(false);
     // Scroll to bottom
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
@@ -492,79 +510,41 @@ let isProcessingQueue = false;
     try {
       // Queue the API call to respect rate limits
       const result = await queueApiCall(async () => {
-        console.log('Checking API key...');
         const apiKey = await checkApiKey();
-  
         if (!apiKey) {
-          throw new Error('OpenAI API key not found. Please set up your API key in the extension popup first.');
+          throw new Error('Gemini API key not found. Please set up your Gemini API key in the extension popup first.');
         }
-        console.log(`API Key found. Length: ${apiKey.length}`);
-  
-        // Get current problem title
+        const model = await getGeminiModel(apiKey);
         const title = getTitleFromCurrentPage();
-        console.log('Problem title:', title);
-  
-        // Prepare the auto-analysis prompt (shortened to reduce token usage)
-        const prompt = `Analyze this Leetcode solution for "${title}":
-  
-  \`\`\`
-  ${userCode}
-  \`\`\`
-  
-  Provide brief feedback on:
-  1. Correctness
-  2. Issues/bugs
-  3. Suggestions
-  4. Complexity
-  
-  Keep response under 300 words.`;
-  
-        console.log('Making API request to OpenAI...');
-        // Send to OpenAI with reduced token limits
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const prompt = `Analyze this Leetcode solution for "${title}":\n\n\
+${userCode}\n\nProvide brief feedback on:\n1. Correctness - is the logic correct or am i thinking the wrong way\n2. Issues/bugs if the logic is right\n3. Suggestions - how can we rectify the same code\n4. Complexity\n\n give a good response.`;
+        // Gemini API call
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: 'gpt-3.5-turbo',
-            messages: [
-              {
-                role: 'system',
-                content: 'You are a helpful coding assistant. Keep responses brief and focused.'
-              },
-              {
-                role: 'user',
-                content: prompt
-              }
-            ],
-            max_tokens: 500, // Reduced from 1200
-            temperature: 0.3 // Reduced for more consistent responses
+            contents: [
+              { role: 'user', parts: [{ text: prompt }] }
+            ]
           })
         });
-  
-        console.log('API response status:', response.status);
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          console.log('API error data:', errorData);
           let errorMessage = `API request failed (${response.status})`;
-          
           if (response.status === 401) {
-            errorMessage = 'Invalid API key. Please check your OpenAI API key.';
+            errorMessage = 'Invalid Gemini API key. Please check your Gemini API key.';
           } else if (response.status === 429) {
-            errorMessage = 'Rate limit exceeded. Please wait 2-3 minutes before trying again.';
-          } else if (response.status === 402) {
-            errorMessage = 'Insufficient credits. Please add credits to your OpenAI account.';
+            errorMessage = 'Rate limit exceeded. Please wait and try again, or check your Gemini usage limits.';
           } else if (errorData.error?.message) {
             errorMessage += `: ${errorData.error.message}`;
           }
-          
           throw new Error(errorMessage);
         }
-  
         const data = await response.json();
-        return data.choices[0]?.message?.content || 'Sorry, I could not analyze your code automatically.';
+        // Gemini response: candidates[0].content.parts[0].text
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not analyze your code automatically.';
       });
   
       // Remove loading indicator
@@ -630,6 +610,7 @@ let isProcessingQueue = false;
     } finally {
       // Always reset the flag
       isAnalyzing = false;
+      setChatInputEnabled(true); // Re-enable chat input after analysis
       console.log('Setting isAnalyzing to false');
     }
   
@@ -708,17 +689,11 @@ let isProcessingQueue = false;
   // Check API key availability
   async function checkApiKey() {
     try {
-      const result = await chrome.storage.local.get(['openai_api_key']);
-      const apiKey = result.openai_api_key || null;
-      
-      if (apiKey && !apiKey.startsWith('sk-')) {
-        console.error('Invalid API key format. Must start with sk-');
-        return null;
-      }
-      
+      const result = await chrome.storage.local.get(['gemini_api_key']);
+      const apiKey = result.gemini_api_key || null;
       return apiKey;
     } catch (error) {
-      console.error('Error checking API key:', error);
+      console.error('Error checking Gemini API key:', error);
       return null;
     }
   }
@@ -763,6 +738,30 @@ let isProcessingQueue = false;
     }
     
     isProcessingQueue = false;
+  }
+
+  // Helper to get the best available Gemini model for generateContent
+  async function getGeminiModel(apiKey) {
+    if (geminiModelName) return geminiModelName;
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`);
+      if (!res.ok) throw new Error('Failed to list Gemini models.');
+      const data = await res.json();
+      // Exclude deprecated/vision/1.0 models
+      const candidates = (data.models || []).filter(m =>
+        !/vision|1\.0/i.test(m.name)
+        && m.supportedGenerationMethods?.includes('generateContent')
+      );
+      // Prefer 1.5-flash, then 1.5-pro, then any other
+      let best = candidates.find(m => m.name.endsWith('/gemini-1.5-flash'))
+        || candidates.find(m => m.name.endsWith('/gemini-1.5-pro'))
+        || candidates[0];
+      if (!best) throw new Error('No supported Gemini model found for your API key.');
+      geminiModelName = best.name.split('/').pop();
+      return geminiModelName;
+    } catch (err) {
+      throw new Error('Could not detect a supported Gemini model for your API key. Please check your key or try again later.');
+    }
   }
 
   // Send message function
@@ -839,75 +838,40 @@ let isProcessingQueue = false;
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
     try {
-      // Check API key
       const apiKey = await checkApiKey();
-
       if (!apiKey) {
-        throw new Error('OpenAI API key not found. Please set up your API key in the extension popup first.');
+        throw new Error('Gemini API key not found. Please set up your Gemini API key in the extension popup first.');
       }
-
-      // Get current problem title
+      const model = await getGeminiModel(apiKey);
       const title = getTitleFromCurrentPage();
-
-      // Prepare the prompt
-      const prompt = `You are an AI coding assistant helping with a Leetcode problem: "${title}".
-
-User's code:
-\`\`\`
-${userCode}
-\`\`\`
-
-User question: ${message}
-
-Please provide a helpful response that includes:
-1. Analyze if the logic of the code is correct
-2. If correct, identify what issues might exist (syntax, edge cases, efficiency, etc.)
-3. If incorrect, provide specific corrections to the existing code (don't rewrite everything from scratch)
-4. If the approach is completely wrong, suggest trying a different approach
-
-Keep your response concise, actionable, and focused on helping the user solve the problem step by step.`;
-
-      // Send to OpenAI
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const prompt = `You are an AI coding assistant helping with a Leetcode problem: "${title}".\n\nUser's code:\n\
+${userCode}\n\nUser question: ${message}\n\nPlease provide a helpful response that includes:\n1. Analyze if the logic of the code is correct\n2. If correct, identify what issues might exist (syntax, edge cases, efficiency, etc.)\n3. If incorrect, provide specific corrections to the existing code (don't rewrite everything from scratch)\n4. If the approach is completely wrong, suggest trying a different approach\n\nKeep your response concise, actionable, and focused on helping the user solve the problem step by step.`;
+      // Gemini API call
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a helpful coding assistant specializing in debugging and optimizing Leetcode solutions. Always be constructive and provide specific, actionable feedback.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: 1000,
-          temperature: 0.7
+          contents: [
+            { role: 'user', parts: [{ text: prompt }] }
+          ]
         })
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         let errorMessage = `API request failed (${response.status})`;
-        
         if (response.status === 401) {
-          errorMessage = 'Invalid API key. Please check your OpenAI API key in the extension popup.';
+          errorMessage = 'Invalid Gemini API key. Please check your Gemini API key.';
         } else if (response.status === 429) {
-          errorMessage = 'Rate limit exceeded. Please wait 1-2 minutes and try again, or check your OpenAI usage limits.';
+          errorMessage = 'Rate limit exceeded. Please wait and try again, or check your Gemini usage limits.';
         } else if (errorData.error?.message) {
           errorMessage += `: ${errorData.error.message}`;
         }
-        
         throw new Error(errorMessage);
       }
-
       const data = await response.json();
-      const aiResponse = data.choices[0]?.message?.content || 'Sorry, I could not generate a response.';
+      const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.';
 
       // Remove loading indicator
       loadingDiv.remove();
