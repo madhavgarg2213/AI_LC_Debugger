@@ -19,16 +19,16 @@ A Chrome extension that provides AI-powered debugging assistance for Leetcode pr
 
 - 🤖 **AI-Powered Assistance**: Get help debugging and optimizing your Leetcode solutions
 - 💬 **Floating Chat Interface**: Click the robot icon on any Leetcode problem page to open a chat
-- 🔑 **Secure API Key Storage**: Your OpenAI API key is stored securely in Chrome's local storage
+- 🔑 **Secure API Key Storage**: Your Google Gemini API key is stored securely in Chrome's local storage
 - 🎯 **Context-Aware**: The AI understands the current problem and your code
 - 🚀 **Easy Setup**: Simple one-time setup with your OpenAI API key
 
 ## Setup
 
 1. **Get an OpenAI API Key**
-   - Visit [OpenAI Platform](https://platform.openai.com/account/api-keys)
+   - Visit [Google Gemini Platform]([https://platform.openai.com/account/api-keys](https://aistudio.google.com/app/apikey)
    - Create a new API key
-   - Copy the key (starts with `sk-`)
+   - Copy the key (starts with `al-`)
 
 2. **Build the Extension**
    ```bash
@@ -44,7 +44,7 @@ A Chrome extension that provides AI-powered debugging assistance for Leetcode pr
 
 4. **Configure the Extension**
    - Click the extension icon in your Chrome toolbar
-   - Enter your OpenAI API key
+   - Enter your Google Gemini API key
    - Click "Save & Continue"
 
 ## Usage
